@@ -1,0 +1,44 @@
+yaml
+name: Build Mac plugin
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build-mac:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -G Xcode
+
+      - name: Build VST3 and AU (universal, Apple Silicon and Intel)
+        run: cmake --build build --config Release --target Smadder_VST3 Smadder_AU -- -quiet
+
+      - name: Sign (ad-hoc) and package
+        run: |
+          ART=build/Smadder_artefacts/Release
+          mkdir -p Smadder
+          cp -R "$ART/VST3/Smadder.vst3" Smadder/
+          cp -R "$ART/AU/Smadder.component" Smadder/
+          codesign --force --deep --sign - Smadder/Smadder.vst3
+          codesign --force --deep --sign - Smadder/Smadder.component
+          lipo -info Smadder/Smadder.vst3/Contents/MacOS/Smadder
+          cp INSTALL.txt Smadder/
+          ditto -c -k --keepParent Smadder Smadder-mac.zip
+
+      - name: Validate AU with Apple's auval
+        continue-on-error: true
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R Smadder/Smadder.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          sleep 2
+          auval -v aufx Smdr Jk2f
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Smadder-mac
+          path: Smadder-mac.zip
